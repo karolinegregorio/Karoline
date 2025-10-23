@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simulador de Renda Passiva com FIIs / Independência Financeira</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--muted:#94a3b8;--accent:#10b981;--glass:rgba(255,255,255,0.04)}
+    *{box-sizing:border-box;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
+    body{margin:0;background:linear-gradient(180deg,#071022 0%, #071a2b 100%);color:#e6eef8;min-height:100vh;padding:28px}
+    .container{max-width:980px;margin:0 auto}
+    h1{font-size:22px;margin:0 0 6px}
+    h2{font-size:16px;margin:0 0 12px;color:var(--muted)}
+    .grid{display:grid;grid-template-columns:1fr 360px;gap:18px}
+    .card{background:var(--card);border-radius:12px;padding:18px;box-shadow:0 6px 20px rgba(2,6,23,0.6);}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type=number]{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:var(--glass);color:inherit}
+    .row{display:flex;gap:10px}
+    .row .col{flex:1}
+    button{background:var(--accent);border:none;padding:10px 14px;border-radius:8px;color:#042017;font-weight:600;cursor:pointer}
+    .result{font-size:18px;margin-top:8px}
+    .small{font-size:13px;color:var(--muted)}
+    .progress{height:14px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden}
+    .bar{height:100%;background:linear-gradient(90deg,#34d399,#10b981);width:0%}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{padding:8px;border-bottom:1px dashed rgba(255,255,255,0.03);text-align:right;font-size:13px}
+    th{text-align:left;color:var(--muted)}
+    .footer{margin-top:12px;color:var(--muted);font-size:13px}
+    @media (max-width:900px){.grid{grid-template-columns:1fr;}.card{padding:14px}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Simulador de Renda Passiva com FIIs / Independência Financeira</h1>
+    <h2>Calcule em quanto tempo alcança sua independência financeira com FIIs</h2>
+
+    <div class="grid">
+      <div class="card">
+        <strong>Entradas</strong>
+        <div style="margin-top:12px;display:grid;gap:10px">
+          <div class="row">
+            <div class="col">
+              <label>Idade atual</label>
+              <input id="age" type="number" min="0" value="30" />
+            </div>
+            <div class="col">
+              <label>Idade de aposentadoria desejada (opcional)</label>
+              <input id="targetAge" type="number" min="0" placeholder="ou deixe em branco" />
+            </div>
+          </div>
+
+          <div>
+            <label>Renda passiva desejada (R$ / mês)</label>
+            <input id="targetIncomeMonthly" type="number" min="0" value="3000" />
+          </div>
+
+          <div class="row">
+            <div class="col">
+              <label>Poupança atual (R$)</label>
+              <input id="currentSavings" type="number" min="0" value="20000" />
+            </div>
+            <div class="col">
+              <label>Contribuição mensal (R$)</label>
+              <input id="monthlyContribution" type="number" min="0" value="1000" />
+            </div>
+          </div>
+
+          <div>
+            <label>Retorno esperado mensal (%) — FIIs</label>
+            <input id="monthlyReturn" type="number" min="0" step="0.01" value="0.7" />
+            <div class="small">Valor padrão baseado em FIIs (0,7% ao mês)</div>
+          </div>
+
+          <div style="display:flex;gap:10px;align-items:center;margin-top:6px">
+            <button id="calc">Calcular</button>
+            <button id="export">Exportar CSV</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <strong>Resumo</strong>
+        <div id="summary" style="margin-top:10px">Preencha os campos e clique em Calcular.</div>
+
+        <div style="margin-top:12px">
+          <div class="small">Progresso em direção à renda desejada</div>
+          <div class="progress" style="margin-top:8px"><div id="bar" class="bar"></div></div>
+          <div id="progressText" class="small" style="margin-top:6px"></div>
+        </div>
+
+        <div id="chartWrapper" style="margin-top:12px">
+          <canvas id="plot" width="320" height="160" style="width:100%;height:140px;background:transparent;border-radius:8px"></canvas>
+        </div>
+
+        <div class="footer">Nota: Este simulador é uma estimativa e não substitui análise financeira profissional.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <strong>Projeção ano a ano</strong>
+      <div id="tableWrap"></div>
+    </div>
+  </div>
+
+<script>
+function money(x){return Number(x).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0})}
+function round(n,dec=2){return Math.round(n*Math.pow(10,dec))/Math.pow(10,dec)}
+
+function compute(){
+  const age = Number(document.getElementById('age').value)||0;
+  const targetAgeInput = document.getElementById('targetAge').value;
+  const targetAge = targetAgeInput!=='' ? Number(targetAgeInput) : null;
+  const targetMonthly = Number(document.getElementById('targetIncomeMonthly').value)||0;
+  const current = Number(document.getElementById('currentSavings').value)||0;
+  const contrib = Number(document.getElementById('monthlyContribution').value)||0;
+  const monthlyReturn = Number(document.getElementById('monthlyReturn').value)/100||0;
+
+  const neededMonthlyCapital = targetMonthly / monthlyReturn;
+
+  let monthsToGoal = 0;
+  let balance = current;
+  const projection = [];
+  while(balance < neededMonthlyCapital && monthsToGoal < 1200){
+    balance = balance * (1 + monthlyReturn) + contrib;
+    if(monthsToGoal % 12 === 0) projection.push({year: monthsToGoal/12, balance, income: balance*monthlyReturn});
+    monthsToGoal++;
+  }
+
+  const years = Math.floor(monthsToGoal/12);
+  const monthsRem = monthsToGoal % 12;
+  const reachAge = age + monthsToGoal/12;
+
+  return {age,targetAge,targetMonthly,current,contrib,monthlyReturn,neededMonthlyCapital,monthsToGoal,years,monthsRem,reachAge,projection};
+}
+
+function render(){
+  const out = compute();
+  const s = document.getElementById('summary');
+  const bar = document.getElementById('bar');
+  const progressText = document.getElementById('progressText');
+
+  if(out.balance < out.neededMonthlyCapital){
+    s.innerHTML = `<div class="result">Meta: ${money(out.neededMonthlyCapital)} (capital necessário)</div><div class="small muted">Não é possível estimar com os parâmetros atuais — reveja aporte ou retorno.</div>`;
+    bar.style.width = '0%';
+    progressText.textContent = '';
+  } else {
+    const etaText = `Você alcançará R$ ${out.targetMonthly.toLocaleString('pt-BR')} /mês em ${out.years} anos e ${out.monthsRem} meses (aprox. aos ${out.reachAge.toFixed(1)} anos).`;
+    s.innerHTML = `<div class="result">Meta: ${money(out.neededMonthlyCapital)}</div><div class="small">${etaText}</div><div class="small">Saldo atual: ${money(out.current)} • Aporte mensal: ${money(out.contrib)} • Retorno mensal esperado: ${(out.monthlyReturn*100).toFixed(2)}%</div>`;
+    const progressPercent = Math.min(100, Math.round((out.current / out.neededMonthlyCapital) * 100));
+    bar.style.width = progressPercent + '%';
+    progressText.textContent = `Saldo atual cobre ~${progressPercent}% do capital necessário.`;
+    drawChart(out.projection, out.neededMonthlyCapital);
+    renderTable(out.projection, out.neededMonthlyCapital);
+  }
+}
+
+function drawChart(proj, target){
+  const canvas = document.getElementById('plot');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const w = canvas.width; const h = canvas.height;
+  const points = proj.map(p=>({x:p.year,y:p.balance}));
+  const maxVal = Math.max(target, ...points.map(p=>p.y));
+  const pad = 20;
+  ctx.lineWidth=1;ctx.strokeStyle='rgba(255,255,255,0.06)';
+  ctx.beginPath();ctx.moveTo(pad,h-pad);ctx.lineTo(w-pad,h-pad);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(pad,h-pad);ctx.lineTo(pad,pad);ctx.stroke();
+  const yTarget = pad + (1 - target/maxVal)*(h-2*pad);
+  ctx.setLineDash([6,6]);ctx.strokeStyle='rgba(255,99,132,0.6)';ctx.beginPath();ctx.moveTo(pad,yTarget);ctx.lineTo(w-pad,yTarget);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='11px Inter';ctx.fillText('Meta: '+money(target), pad+6, yTarget-6);
+  const stepX = (w-2*pad)/(points.length-1);
+  ctx.beginPath();ctx.strokeStyle='rgba(52,211,153,0.9)';ctx.lineWidth=2;
+  points.forEach((pt,i)=>{const px=pad+i*stepX;const py=pad+(1-pt.y/maxVal)*(h-2*pad);i===0?ctx.moveTo(px,py):ctx.lineTo(px,py)});
+  ctx.stroke();
+}
+
+function renderTable(proj, target){
+  const wrap = document.getElementById('tableWrap');
+  let html='<table><thead><tr><th>Ano</th><th>Saldo (R$)</th><th>Renda (R$)</th><th>Meta atingida?</th></tr></thead><tbody>';
+  for(let i=0;i<proj.length;i++){const {year,balance,income}=proj[i];const reached=income>=target?'Sim':'—';html+=`<tr><td style="text-align:left">${year}</td><td>${money(balance)}</td><td>${money(income)}</td><td>${reached}</td></tr>`}
+  html+='</tbody></table>';
+  wrap.innerHTML=html;
+}
+
+function exportCSV(){
+  const out=compute();
+  if(out.balance<out.neededMonthlyCapital){alert('Projeção não é possível com os parâmetros atuais. Ajuste valores antes de exportar.');return}
+  let csv='ano,saldo,renda\n';
+  out.projection.forEach(p=>{csv+=`${p.year},${round(p.balance)},${round(p.income)}\n`});
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='projecao_independencia.csv';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+
+document.getElementById('calc').addEventListener('click',render);
+document.getElementById('export').addEventListener('click',exportCSV);
+[...document.querySelectorAll('input')].forEach(el=>el.addEventListener('change',render));
+
+render();
+</script>
+</body>
+</html>
